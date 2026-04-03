@@ -34,63 +34,61 @@ interface StoreState {
   viewportRect: { width: number; height: number };
   setTransform: (transform: { x: number; y: number; k: number }) => void;
   setViewportRect: (rect: { width: number; height: number }) => void;
+  initItems: (items: InfiniteCanvasItem[]) => void;
 }
 
-const useVisibilityStore = createWithEqualityFn<StoreState>()(
-  (set, get) => {
-    const worker = new Worker(
-      new URL("./visibility-worker.ts", import.meta.url),
-      { type: "module" }
-    );
+const useVisibilityStore = createWithEqualityFn<StoreState>()((set, get) => {
+  const worker = new Worker(
+    new URL("./visibility-worker.ts", import.meta.url),
+    { type: "module" },
+  );
 
-    let items: InfiniteCanvasItem[] = [];
+  let items: InfiniteCanvasItem[] = [];
 
-    worker.onmessage = (event: MessageEvent<VisibilityWorkerResponse>) => {
-      const data = event.data;
-      if (data.type === "update-visibility") {
-        set({ visibleCardIds: data.payload });
-      }
-    };
+  worker.onmessage = (event: MessageEvent<VisibilityWorkerResponse>) => {
+    const data = event.data;
+    if (data.type === "update-visibility") {
+      set({ visibleCardIds: data.payload });
+    }
+  };
 
-    return {
-      visibleCardIds: new Set<string>(),
-      transform: { x: 0, y: 0, k: 1 },
-      viewportRect: { width: 0, height: 0 },
-      setTransform: (transform) => {
-        set({ transform });
-        worker.postMessage({
-          type: "init",
-          payload: items,
-        } satisfies VisibilityWorkerMessage);
-        worker.postMessage({
-          type: "calculate-visibility",
-          payload: {
-            transform: get().transform,
-            viewportRect: get().viewportRect,
-          },
-        });
-      },
-      setViewportRect: (viewportRect) => {
-        set({ viewportRect });
-        worker.postMessage({
-          type: "calculate-visibility",
-          payload: {
-            transform: get().transform,
-            viewportRect: get().viewportRect,
-          },
-        });
-      },
-      initItems: (newItems: InfiniteCanvasItem[]) => {
-        items = newItems;
-        worker.postMessage({
-          type: "init",
-          payload: items,
-        } satisfies VisibilityWorkerMessage);
-      },
-    };
-  },
-  shallow
-);
+  return {
+    visibleCardIds: new Set<string>(),
+    transform: { x: 0, y: 0, k: 1 },
+    viewportRect: { width: 0, height: 0 },
+    setTransform: (transform) => {
+      set({ transform });
+      worker.postMessage({
+        type: "init",
+        payload: items,
+      } satisfies VisibilityWorkerMessage);
+      worker.postMessage({
+        type: "calculate-visibility",
+        payload: {
+          transform: get().transform,
+          viewportRect: get().viewportRect,
+        },
+      });
+    },
+    setViewportRect: (viewportRect) => {
+      set({ viewportRect });
+      worker.postMessage({
+        type: "calculate-visibility",
+        payload: {
+          transform: get().transform,
+          viewportRect: get().viewportRect,
+        },
+      });
+    },
+    initItems: (newItems: InfiniteCanvasItem[]) => {
+      items = newItems;
+      worker.postMessage({
+        type: "init",
+        payload: items,
+      } satisfies VisibilityWorkerMessage);
+    },
+  };
+}, shallow);
 
 export interface InfiniteCanvasProps<T extends InfiniteCanvasItem> {
   items: T[];
@@ -137,7 +135,7 @@ export function InfiniteCanvas<T extends InfiniteCanvasItem>({
         animationFrameRef.current = requestAnimationFrame(update);
       }
     },
-    [update]
+    [update],
   );
 
   useEffect(() => {
@@ -181,7 +179,10 @@ export function InfiniteCanvas<T extends InfiniteCanvasItem>({
     initItems(items);
   }, [items, initItems]);
 
-  const itemsMap = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
+  const itemsMap = useMemo(
+    () => new Map(items.map((item) => [item.id, item])),
+    [items],
+  );
 
   const visibleItems = useMemo(() => {
     const result: T[] = [];
@@ -197,19 +198,34 @@ export function InfiniteCanvas<T extends InfiniteCanvasItem>({
   return (
     <div
       ref={viewportRef}
-      className={`relative flex-1 overflow-hidden ${className}`}
-      style={{ width: "100%", height: "100%" }}
+      className={className}
+      style={{
+        width: "100%",
+        height: "100%",
+        position: "relative",
+        overflow: "hidden",
+        flex: "1 1 0%",
+      }}
     >
       <div
         ref={planeRef}
-        style={{ transform: "translate(0px, 0px) scale(1)" }}
-        className="pointer-events-none absolute top-0 left-0 will-change-transform"
+        style={{
+          transform: "translate(0px, 0px) scale(1)",
+          position: "absolute",
+          top: 0,
+          left: 0,
+          willChange: "transform",
+          pointerEvents: "none",
+          transformOrigin: "0 0",
+        }}
       >
         {visibleItems.map((item) => (
           <div
             key={`${item.id}-${repaintKey}`}
-            className="absolute pointer-events-auto cursor-pointer"
             style={{
+              position: "absolute",
+              pointerEvents: "auto",
+              cursor: "pointer",
               height: item.height,
               width: item.width,
               transform: `translate(${item.x}px, ${item.y}px)`,
