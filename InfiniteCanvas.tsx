@@ -2,6 +2,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -59,10 +60,6 @@ const useVisibilityStore = createWithEqualityFn<StoreState>()((set, get) => {
     setTransform: (transform) => {
       set({ transform });
       worker.postMessage({
-        type: "init",
-        payload: items,
-      } satisfies VisibilityWorkerMessage);
-      worker.postMessage({
         type: "calculate-visibility",
         payload: {
           transform: get().transform,
@@ -86,9 +83,27 @@ const useVisibilityStore = createWithEqualityFn<StoreState>()((set, get) => {
         type: "init",
         payload: items,
       } satisfies VisibilityWorkerMessage);
+      worker.postMessage({
+        type: "calculate-visibility",
+        payload: {
+          transform: get().transform,
+          viewportRect: get().viewportRect,
+        },
+      });
     },
   };
 }, shallow);
+
+export interface InfiniteCanvasTransform {
+  x: number;
+  y: number;
+  k: number;
+}
+
+export interface InfiniteCanvasTransformRequest extends InfiniteCanvasTransform {
+  /** Change the ID for each new command; repeats of the last applied ID are ignored. */
+  id: number;
+}
 
 export interface InfiniteCanvasProps<T extends InfiniteCanvasItem> {
   items: T[];
@@ -96,6 +111,8 @@ export interface InfiniteCanvasProps<T extends InfiniteCanvasItem> {
   className?: string;
   minZoom?: number;
   maxZoom?: number;
+  transformRequest?: InfiniteCanvasTransformRequest;
+  onTransformChange?: (transform: InfiniteCanvasTransform) => void;
 }
 
 export function InfiniteCanvas<T extends InfiniteCanvasItem>({
@@ -104,6 +121,8 @@ export function InfiniteCanvas<T extends InfiniteCanvasItem>({
   className = "",
   minZoom = 0.1,
   maxZoom = 3,
+  transformRequest,
+  onTransformChange,
 }: InfiniteCanvasProps<T>) {
   const setTransform = useVisibilityStore((state) => state.setTransform);
   const setViewportRect = useVisibilityStore((state) => state.setViewportRect);
@@ -117,15 +136,23 @@ export function InfiniteCanvas<T extends InfiniteCanvasItem>({
   const transformRef = useRef<{ x: number; y: number; k: number } | null>(null);
   const animationFrameRef = useRef<number | null>(null);
   const [repaintKey, setRepaintKey] = useState(0);
+  const zoomRef = useRef<d3.ZoomBehavior<HTMLDivElement, unknown> | null>(null);
+  const lastTransformRequestIdRef = useRef<number | undefined>(undefined);
+  const onTransformChangeRef = useRef(onTransformChange);
   const repaintKeyRef = useRef(setRepaintKey);
 
+  useLayoutEffect(() => {
+    onTransformChangeRef.current = onTransformChange;
+  }, [onTransformChange]);
+
   const update = useCallback(() => {
+    animationFrameRef.current = null;
     if (transformRef.current && planeRef.current) {
       const { x, y, k } = transformRef.current;
       planeRef.current.style.transform = `translate(${x}px, ${y}px) scale(${k})`;
       setTransform(transformRef.current);
+      onTransformChangeRef.current?.({ x, y, k });
     }
-    animationFrameRef.current = null;
   }, [setTransform]);
 
   const scheduleUpdate = useCallback(
@@ -152,12 +179,35 @@ export function InfiniteCanvas<T extends InfiniteCanvasItem>({
       .on("end", () => {
         repaintKeyRef.current((k) => k + 1);
       });
+    zoomRef.current = zoom;
     viewport.call(zoom);
 
     return () => {
+      zoomRef.current = null;
       viewport.on(".zoom", null);
     };
   }, [minZoom, maxZoom, scheduleUpdate]);
+
+  useEffect(() => {
+    if (!viewportRef.current || !zoomRef.current || !transformRequest) return;
+    const { id, x, y, k } = transformRequest;
+    if (
+      id === lastTransformRequestIdRef.current ||
+      !Number.isFinite(id) ||
+      !Number.isFinite(x) ||
+      !Number.isFinite(y) ||
+      !Number.isFinite(k) ||
+      k <= 0
+    ) return;
+    const target = d3.zoomIdentity
+      .translate(x, y)
+      .scale(Math.max(minZoom, Math.min(maxZoom, k)));
+    lastTransformRequestIdRef.current = id;
+    d3.select<HTMLDivElement, unknown>(viewportRef.current).call(
+      zoomRef.current.transform,
+      target,
+    );
+  }, [transformRequest, minZoom, maxZoom]);
 
   useEffect(() => {
     if (!viewportRef.current) return;

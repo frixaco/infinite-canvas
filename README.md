@@ -9,6 +9,17 @@ npm i
 npx vite dev
 ```
 
+### Transform control
+
+Pass `transformRequest={{ id, x, y, k }}` to move the canvas. Change `id` for
+each new command; recreating an object with the last applied ID does not replay it.
+Requests require finite numeric values and a positive scale. Valid scales are
+clamped to `minZoom` and `maxZoom`.
+
+`onTransformChange` receives the latest applied transform once per animation
+frame, including programmatic changes. Its callback can change without resetting
+the gesture listeners.
+
 ### Files
 
 - `InfiniteCanvas.tsx` — infinite canvas component
